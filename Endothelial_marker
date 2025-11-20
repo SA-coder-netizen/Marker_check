@@ -1,0 +1,247 @@
+import scanpy as sc
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import zscore
+
+# --- Step 1: Load and Prepare Data (as before) ---
+adata_ref = sc.read("/scratch/user/uqsatlur/spatial/vento_Raw_data/vento_raw/endometriumAtlasV2_cells_with_counts.h5ad")
+adata_ref.var_names_make_unique()
+
+all_genes = [
+    "CDH5", "VWF", "RNASE1", "PECAM1", "PCDH17", "ADGRL4", "PTPRC", "CLDN5", "CD34", "ESAM", "A2M", "ENG", "FLT1", "SOX18", "EMCN", "ACKR1",
+    "PLVAP", "SEMA3G", "MNRN1", "HEG1", "FLI1", "TEK", "SPINK4", "SELE", "ECSCR", "KDR", "STEAP4", "SSTR2", "SMTNL2", "ACTA2", "GUCY1A2", "MCAM", 
+    "RGS5", "MYH11", "NTRK2", "FHL5", "MMP11", "TDO2", "CYGB", "SORBS2", "ZEB2", "CD44", "COL1A1", "COL1A2", "ESR1", "PGR", "TNC", "CCL14", "CCL23",
+    "CPE", "APOE", "MKI67", "CXCR4", "ESM1", "NEBL", "SULF1", "FAM107A", "GLUL", "TSPAN2", "FBLN5", "AC004947.1", "SSTR1", "EDNRB", "RELN", "PROX1",
+    "CCL21", "FLT4", "PDPN", "FABP4", "COLEC12", "NRP2", "FXYD6", "CD36", "TIE1", "CAVIN2", "GGT5", "TFF3", "NOTCH3", "PDGFRB", "PDE3A", "NDUFA4L2", 
+    "NTRK3", "OLFML2B", "SLC38A11", "MYOM2", "STC2", "ICAM2", "IGFBP3", "MGP", "CTGF", "HOPX", "PRKCDBP", "ATP5I", "FOXC1", "DEPP1", "CDKN1A", "CD73", 
+    "SUSD2", "MYLK", "ADIRF", "HAPLN1", "APCDD1", "DPEP1", "TOP2A", "COL4A1", "COL4A2", "THBD", "HMOX1", "MT1E", "MT1X", "EFNB2", "BMX", 
+    "GJA4", "MECOM", "CCL15", "POSTN", "TNFRSF1A", "CSF3", "KLF4", "FOSB", "EGR1", "FOS", "IER5L", "FAM110D", "ADASTML2", "SPP1", "COL15A1", "VCAM1", "GJA5"
+]
+unique_all_genes = list(dict.fromkeys(all_genes))
+ordered_genes = [gene for gene in unique_all_genes if gene in adata_ref.var_names]
+
+sc.tl.dendrogram(adata_ref, var_names=ordered_genes, groupby='celltype')
+celltype_order = adata_ref.uns['dendrogram_celltype']['categories_ordered']
+
+# --- Step 2: Create the Scaled Data Matrix (as before) ---
+expr_df = adata_ref[:, ordered_genes].to_df()
+expr_df['celltype'] = adata_ref.obs['celltype'].values
+heatmap_df = expr_df.groupby('celltype').mean().T
+heatmap_df = heatmap_df[celltype_order]
+heatmap_scaled = pd.DataFrame(zscore(heatmap_df, axis=1), index=heatmap_df.index, columns=heatmap_df.columns)
+# --- Step 3: The Master Plotting Function with Gene Clustering ---
+def create_a4_clustermap_word_friendly(data, orientation='portrait'):
+    """
+    Generates a clustered heatmap (clustermap) sized for an A4 page.
+    """
+    n_genes = data.shape[0]
+
+    if orientation == 'portrait':
+        page_width, page_height = 8.27, 11.69
+    else: # landscape
+        page_width, page_height = 14, 14
+    
+    # Heuristic: The figure size should be slightly smaller than the page
+    # to accommodate the dendrogram and labels comfortably.
+    fig_width = page_width * 0.95
+    fig_height = page_height * 0.95
+    
+    # Calculate font size based on the figure height
+    dynamic_font_size = max(3, int(fig_height * 0.8 * 72 / n_genes))
+
+    print(f"--- Generating {orientation} clustermap ---")
+    print(f"Figure size: {fig_width:.2f} x {fig_height:.2f} inches")
+    print(f"Calculated font size for gene labels: {dynamic_font_size}pt")
+    
+    # --- MODIFICATION 1: Use seaborn.clustermap ---
+    # This single command creates the figure, clusters the rows, and draws the heatmap.
+    cluster_grid = sns.clustermap(
+        data,
+        figsize=(fig_width, fig_height),
+        row_cluster=True,   # <-- THIS IS THE KEY LINE FOR GENE CLUSTERING
+        col_cluster=False,  # <-- Keep our pre-calculated cell type order
+        cmap='vlag',
+        xticklabels=True,
+        yticklabels=True,
+        cbar_kws={'label': 'Log-normalized Expression', 'shrink': 0.6},
+        dendrogram_ratio=(0.1, 0.2) # Adjust space for dendrograms (row, col)
+    )
+    cluster_grid.ax_row_dendrogram.set_visible(False)
+
+     # Get the current position of the color bar's axis
+    cbar_ax = cluster_grid.cax
+    cbar_pos = cbar_ax.get_position() # This is a Bbox object: [left, bottom, width, height]
+
+    # Define how much you want to shift it (e.g., 0.03 means 3% of the figure width)
+    # Increase this value to move it further away.
+    horizontal_shift = -0.025
+
+    # Set the new position of the color bar
+    cbar_ax.set_position([
+        cbar_pos.x0 + horizontal_shift, # New 'left' position
+        cbar_pos.y0 + -0.18, # Keep original 'bottom'
+        cbar_pos.width,                 # Keep original 'width'
+        cbar_pos.height                 # Keep original 'height'
+    ])
+    # --- MODIFICATION 2: Access the heatmap axis from the clustermap object ---
+    ax = cluster_grid.ax_heatmap
+    
+    # Customize labels on the specific heatmap axis
+    ax.set_xlabel("Cell Types (Clustered)", fontsize=10)
+    ax.set_ylabel("Genes (Clustered)", fontsize=10)
+    ax.tick_params(axis='x', labelsize=8, labelrotation=90)
+    ax.tick_params(axis='y', labelsize=dynamic_font_size)
+
+    # --- MODIFICATION 3: Save the figure using the clustermap object ---
+    base_filename = f"A4_clustermap_{orientation}"
+    
+    png_filename = f"{base_filename}.png"
+    cluster_grid.savefig(png_filename, dpi=300)
+    print(f"Saved PNG for Word: '{png_filename}'")
+
+    svg_filename = f"{base_filename}.svg"
+    cluster_grid.savefig(svg_filename)
+    print(f"Saved SVG for editing: '{svg_filename}'\n")
+    
+    plt.show()
+
+# --- Step 4: Generate and Save Both Versions ---
+create_a4_clustermap_word_friendly(heatmap_scaled, orientation='portrait')
+create_a4_clustermap_word_friendly(heatmap_scaled, orientation='landscape')
+from sklearn.metrics import roc_auc_score
+from statsmodels.stats.multitest import multipletests
+
+# --- step A: subset data to ordered genes only ---
+adata_g = adata_ref[:, ordered_genes].copy()
+
+# --- step B: calculate per-celltype mean + % expression ---
+def group_mean(adata_sub, by, genes):
+    df = []
+    for ct in adata_sub.obs[by].unique():
+        idx = (adata_sub.obs[by] == ct).values
+        means = np.asarray(adata_sub[idx, genes].X.mean(axis=0)).ravel()
+        df.append(pd.DataFrame({"celltype": ct, "gene": genes, "mean": means}))
+    return pd.concat(df, ignore_index=True)
+
+def group_pct_expr(adata_sub, by, genes, thresh=0.0):
+    df = []
+    for ct in adata_sub.obs[by].unique():
+        idx = (adata_sub.obs[by] == ct).values
+        mat = np.asarray(adata_sub[idx, genes].X.toarray() if hasattr(adata_sub.X, "toarray") else adata_sub[idx, genes].X)
+        pct = (mat > thresh).sum(axis=0) / mat.shape[0] * 100.0
+        df.append(pd.DataFrame({"celltype": ct, "gene": genes, "pct_expr": pct}))
+    return pd.concat(df, ignore_index=True)
+
+G_mean = group_mean(adata_g, "celltype", ordered_genes)
+G_pct  = group_pct_expr(adata_g, "celltype", ordered_genes)
+
+summary = (G_mean.merge(G_pct, on=["celltype","gene"])
+                 .pivot(index="gene", columns="celltype", values=["mean","pct_expr"]))
+mean_mat = summary["mean"].fillna(0)
+pct_mat  = summary["pct_expr"].fillna(0)
+
+# --- step C: specificity functions ---
+def tau_specificity(values):
+    v = np.array(values, dtype=float)
+    vmax = v.max()
+    if vmax <= 0: return 0.0
+    return ((1 - (v / vmax)).sum()) / (len(v) - 1)
+
+def one_minus_runnerup(values):
+    v = np.array(values, dtype=float)
+    if v.max() <= 0: return 0.0
+    top2 = np.sort(v)[-2:]
+    if top2[-1] == 0: return 0.0
+    return 1.0 - (top2[-2] / top2[-1])
+
+def best_auroc_for_gene(adata_sub, gene, by):
+    # extract expression for this gene as 1D array
+    x = adata_sub[:, gene].X
+    if hasattr(x, "toarray"):
+        y = x.toarray().ravel()
+    else:
+        y = np.asarray(x).ravel()
+    
+    aurocs = []
+    for ct in adata_sub.obs[by].unique():
+        label = (adata_sub.obs[by] == ct).astype(int).values
+        if label.sum() == 0 or label.sum() == len(label):
+            continue
+        try:
+            aurocs.append(roc_auc_score(label, y))
+        except ValueError:
+            continue
+    return np.nanmax(aurocs) if len(aurocs) > 0 else np.nan
+
+
+# --- step D: compute per-gene metrics ---
+rows = []
+for g in ordered_genes:
+    vals = mean_mat.loc[g, ordered_cell_types].values
+    tau = tau_specificity(vals)
+    omru = one_minus_runnerup(vals)
+    au = best_auroc_for_gene(adata_g, g, "celltype")
+    target = mean_mat.loc[g, ordered_cell_types].idxmax()
+    rows.append({"gene": g, "target_celltype": target, "tau": tau, 
+                 "one_minus_runnerup": omru, "best_AUROC": au})
+
+spec_df = pd.DataFrame(rows)
+
+# --- step E: statistical test for top cell type (optional but useful) ---
+from scipy.stats import ranksums
+
+pvals = []
+for _, row in spec_df.iterrows():
+    g, ct = row["gene"], row["target_celltype"]
+
+    # extract dense vectors safely
+    in_ct = adata_g[adata_g.obs["celltype"]==ct, g].X
+    out_ct = adata_g[adata_g.obs["celltype"]!=ct, g].X
+
+    # force to 1D numpy arrays
+    if hasattr(in_ct, "toarray"):
+        in_ct = in_ct.toarray().ravel()
+    else:
+        in_ct = np.asarray(in_ct).ravel()
+
+    if hasattr(out_ct, "toarray"):
+        out_ct = out_ct.toarray().ravel()
+    else:
+        out_ct = np.asarray(out_ct).ravel()
+
+    # check both groups are not all-zero
+    if in_ct.sum() == 0 and out_ct.sum() == 0:
+        p = 1.0
+    else:
+        try:
+            _, p = ranksums(in_ct, out_ct)
+        except Exception:
+            p = 1.0
+
+    pvals.append(p)
+
+spec_df["p_top_vs_rest"] = pvals
+spec_df["p_adj"] = multipletests(spec_df["p_top_vs_rest"], method="fdr_bh")[1]
+
+# --- step F: call unique vs multi markers ---
+tau_thr, omru_thr, au_thr, pct_thr, mean_thr, padj_thr = 0.7, 0.6, 0.85, 10.0, 0.1, 0.05
+
+def call_marker(gene, row):
+    target = row["target_celltype"]
+    conds = [
+        row["tau"] >= tau_thr,
+        row["one_minus_runnerup"] >= omru_thr,
+        row["best_AUROC"] >= au_thr,
+        row["p_adj"] <= padj_thr,
+        pct_mat.loc[gene, target] >= pct_thr,
+        mean_mat.loc[gene, target] >= mean_thr,
+    ]
+    return "UNIQUE" if all(conds) else "MULTI"
+
+spec_df["marker_call"] = [call_marker(g,row) for g,row in spec_df.set_index("gene").iterrows()]
+
+# --- step G: save results ---
+spec_df.to_csv("gene_specificity_scores.csv", index=False)
+print(spec_df.head(15))
