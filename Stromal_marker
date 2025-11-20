@@ -1,0 +1,269 @@
+import scanpy as sc
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import zscore
+
+# --- Step 1: Load and Prepare Data (as before) ---
+adata_ref = sc.read("/scratch/user/uqsatlur/spatial/vento_Raw_data/vento_raw/endometriumAtlasV2_cells_with_counts.h5ad")
+adata_ref.var_names_make_unique()
+
+all_genes = [
+    "PCOLCE", "DCN", "COL1A1", "COL11A1", "PDGFRA", "ACTA2", "THY1", "CD90", "ENG", "VIM", "DLK1", "ACTG2", "DES", "PTGER3", "MCAM",
+    "BGN", "NOTCH3", "GUCY1A2", "RGS5", "MYH11", "LEFTY2", "RERGL", "PDGFRB", "CNN1", "ITGA8", "COL5A1", "VCAN", "ECM1", "SFRP4", "HAND2",
+    "WT1", "RORB", "CFD", "APOD", "C1R", "PTGDS", "TAGLN", "MYLK", "PRRX1", "C7", "OGN", "MSLN", "UPK3B", "CALB2", "TIMP1", "MT1E", "DPP4",
+    "PDPN", "GAS5", "PGR", "ESR1", "MMP7", "IDO1", "PSAT1", "ENPP3", "GNG11", "CREB3L1", "IHH", "TOP2A", "LUM", "COL6A3", "CRISPLD2", "COL6A1",
+    "CCN5", "COL1A2", "HOXA10", "MME", "SVIL", "KCNMA1", "FAP", "CFH", "CTSH", "COL3A1", "CDH11", "SPARC", "CALD1", "MMP11", "CRABP2", "TUNAR",
+    "FOXL2", "TGFBI", "F13A1", "IGF1", "SFRP1", "MKI67", "RRM2", "PMAIP1", "WNT5A", "DIO2", "MK167", "CCNB1", "CCNB2", "FOXO1", "DKK1", "IL15",
+    "S100A4", "CRYAB", "IGFBP1", "INSR", "WNT3", "TNFSF10", "SCARA5", "CXCL13", "GABRA2", "TLR4", "SMAD7", "CXCL8", "CXCL2", "TRIB1", "SUSD2",
+    "SPP1", "CXCL14", "CDC20", "KRT19", "KRT18", "KRT8", "KRT7", "PTGS1", "ARX", "STAR", "ITGA1", "TNC", "MMP2", "TYMS", "CENPF", "NUSAP1", "HMGB2",
+    "HIST1H4C", "CD24", "ALDH1A1", "CD79A", "JCHAIN", "MZB1", "PLN", "HIGD1B", "INHBA", "MMP10", "MMP3", "MMP1", "COL8A1", "RPL10", "RPS10", "PTN",
+    "IGFBP2", "MMP14", "IGF2", "TIMP2", "CCNL2", "KRT17", "SUN2", "ITGB1", "MDK", "CST1", "ZFP36", "NFKBIA", "ATF3", "C11orf96", "HSPA1A", "DNAJB1",
+    "UBE2C", "PTGIS", "HOXA11", "PTCH1", "HMOX1", "GCLM", "ITM2B", "ENPP2", "PK1B", "ALCAM", "FBXo32", "TUBB2B", "CYTOR", "CK52", "FAM107B", "SFRP5",
+    "WFDC1", "EEF1B2", "MELK", "ASF1B", "KCNQ1OT1", "NEAT1", "XIST", "REV3L", "MALAT1", "IGKC", "CXCL12", "CEBPD", "RPS17", "CCBE1", "IGFBP5", "PMEPA1",
+    "HPSE2", "KCNMA1", "PCNA", "STMN1", "NOTUM", "FRAS1", "ROBO2", "CD74", "HLA-DRA", "HLA-DPB1", "CD47", "SOD2", "CSCL1", "PTX3", "MUC16", "RPS26",
+    "RPL10", "FTH1", "RPS29", "RPL13A", "RPL37A", "RPS27", "IL17RB", "SLC26A7", "WIF1", "ZCCHC12", "LRRTM1", "CLSPN", "FAM111B", "MCM10", "ADAMDEC1",
+    "PLA2G2A", "RPS4Y1"
+]
+unique_all_genes = list(dict.fromkeys(all_genes))
+ordered_genes = [gene for gene in unique_all_genes if gene in adata_ref.var_names]
+
+sc.tl.dendrogram(adata_ref, var_names=ordered_genes, groupby='celltype')
+celltype_order = adata_ref.uns['dendrogram_celltype']['categories_ordered']
+
+# --- Step 2: Create the Scaled Data Matrix (as before) ---
+expr_df = adata_ref[:, ordered_genes].to_df()
+expr_df['celltype'] = adata_ref.obs['celltype'].values
+heatmap_df = expr_df.groupby('celltype').mean().T
+heatmap_df = heatmap_df[celltype_order]
+heatmap_scaled = pd.DataFrame(zscore(heatmap_df, axis=1), index=heatmap_df.index, columns=heatmap_df.columns)
+# --- Step 3: The Master Plotting Function with Gene Clustering ---
+def create_a4_clustermap_word_friendly(data, orientation='portrait'):
+    """
+    Generates a clustered heatmap (clustermap) sized for an A4 page.
+    """
+    n_genes = data.shape[0]
+
+    if orientation == 'portrait':
+        page_width, page_height = 8.27, 11.69
+    else: # landscape
+        page_width, page_height = 14, 14
+    
+    # Heuristic: The figure size should be slightly smaller than the page
+    # to accommodate the dendrogram and labels comfortably.
+    fig_width = page_width * 0.95
+    fig_height = page_height * 0.95
+    
+    # Calculate font size based on the figure height
+    dynamic_font_size = max(3, int(fig_height * 0.8 * 72 / n_genes))
+
+    print(f"--- Generating {orientation} clustermap ---")
+    print(f"Figure size: {fig_width:.2f} x {fig_height:.2f} inches")
+    print(f"Calculated font size for gene labels: {dynamic_font_size}pt")
+    
+    # --- MODIFICATION 1: Use seaborn.clustermap ---
+    # This single command creates the figure, clusters the rows, and draws the heatmap.
+    cluster_grid = sns.clustermap(
+        data,
+        figsize=(fig_width, fig_height),
+        row_cluster=True,   # <-- THIS IS THE KEY LINE FOR GENE CLUSTERING
+        col_cluster=False,  # <-- Keep our pre-calculated cell type order
+        cmap='vlag',
+        xticklabels=True,
+        yticklabels=True,
+        cbar_kws={'label': 'Log-normalized Expression', 'shrink': 0.6},
+        dendrogram_ratio=(0.1, 0.2) # Adjust space for dendrograms (row, col)
+    )
+    cluster_grid.ax_row_dendrogram.set_visible(False)
+
+     # Get the current position of the color bar's axis
+    cbar_ax = cluster_grid.cax
+    cbar_pos = cbar_ax.get_position() # This is a Bbox object: [left, bottom, width, height]
+
+    # Define how much you want to shift it (e.g., 0.03 means 3% of the figure width)
+    # Increase this value to move it further away.
+    horizontal_shift = -0.025
+
+    # Set the new position of the color bar
+    cbar_ax.set_position([
+        cbar_pos.x0 + horizontal_shift, # New 'left' position
+        cbar_pos.y0 + -0.18, # Keep original 'bottom'
+        cbar_pos.width,                 # Keep original 'width'
+        cbar_pos.height                 # Keep original 'height'
+    ])
+    # --- MODIFICATION 2: Access the heatmap axis from the clustermap object ---
+    ax = cluster_grid.ax_heatmap
+    
+    # Customize labels on the specific heatmap axis
+    ax.set_xlabel("Cell Types (Clustered)", fontsize=10)
+    ax.set_ylabel("Genes (Clustered)", fontsize=10)
+    ax.tick_params(axis='x', labelsize=8, labelrotation=90)
+    ax.tick_params(axis='y', labelsize=dynamic_font_size)
+
+    # --- MODIFICATION 3: Save the figure using the clustermap object ---
+    base_filename = f"A4_clustermap_{orientation}"
+    
+    png_filename = f"{base_filename}.png"
+    cluster_grid.savefig(png_filename, dpi=300)
+    print(f"Saved PNG for Word: '{png_filename}'")
+
+    svg_filename = f"{base_filename}.svg"
+    cluster_grid.savefig(svg_filename)
+    print(f"Saved SVG for editing: '{svg_filename}'\n")
+    
+    plt.show()
+
+# --- Step 4: Generate and Save Both Versions ---
+create_a4_clustermap_word_friendly(heatmap_scaled, orientation='portrait')
+create_a4_clustermap_word_friendly(heatmap_scaled, orientation='landscape')
+# --- New Step: Enhanced Marker Analysis and Tiering ---
+
+from statsmodels.stats.multitest import multipletests
+from scipy.stats import ranksums
+
+# --- A: Re-run necessary calculations from your script ---
+# This ensures the matrices are available for the new analysis.
+adata_g = adata_ref[:, ordered_genes].copy()
+
+def group_mean(adata_sub, by, genes):
+    df = []
+    # Use categorical for order and efficiency
+    cats = adata_sub.obs[by].astype('category').cat.categories
+    for ct in cats:
+        idx = (adata_sub.obs[by] == ct).values
+        means = np.asarray(adata_sub[idx, genes].X.mean(axis=0)).ravel()
+        df.append(pd.DataFrame({"celltype": ct, "gene": genes, "mean": means}))
+    return pd.concat(df, ignore_index=True)
+
+def group_pct_expr(adata_sub, by, genes, thresh=0.0):
+    df = []
+    cats = adata_sub.obs[by].astype('category').cat.categories
+    for ct in cats:
+        idx = (adata_sub.obs[by] == ct).values
+        mat = np.asarray(adata_sub[idx, genes].X.toarray() if hasattr(adata_sub.X, "toarray") else adata_sub[idx, genes].X)
+        pct = (mat > thresh).sum(axis=0) / mat.shape[0] * 100.0
+        df.append(pd.DataFrame({"celltype": ct, "gene": genes, "pct_expr": pct}))
+    return pd.concat(df, ignore_index=True)
+
+G_mean = group_mean(adata_g, "celltype", ordered_genes)
+G_pct  = group_pct_expr(adata_g, "celltype", ordered_genes)
+
+summary = (G_mean.merge(G_pct, on=["celltype","gene"])
+                 .pivot(index="gene", columns="celltype", values=["mean","pct_expr"]))
+mean_mat = summary["mean"][ordered_cell_types].fillna(0) # Ensure column order
+pct_mat  = summary["pct_expr"][ordered_cell_types].fillna(0) # Ensure column order
+
+
+# --- B: Define thresholds for the new tier system ---
+LFC_REST_HIGH = 2.0   # Log2FC vs average of rest for high confidence
+LFC_SECOND_HIGH = 1.5 # Log2FC vs runner-up for high confidence
+LFC_SHARED_LOW = 1.0  # Log2FC vs runner-up for shared markers
+LFC_ENRICHED = 1.0    # Minimum Log2FC vs rest for enriched
+PCT_EXPR_MIN = 30.0   # Minimum % expression in target cells
+PADJ_THR = 0.05       # p-value threshold
+
+# --- C: Compute per-gene metrics and classify ---
+analysis_rows = []
+pvals = []
+pseudo_count = 1e-9 # To avoid division by zero
+
+for gene in ordered_genes:
+    row = {}
+    row['gene'] = gene
+    
+    # Get expression values for the current gene
+    gene_expr = mean_mat.loc[gene]
+    
+    # Sort cell types by expression to find top, second, etc.
+    sorted_expr = gene_expr.sort_values(ascending=False)
+    
+    top_ct = sorted_expr.index[0]
+    second_ct = sorted_expr.index[1]
+    
+    mean_in_top = sorted_expr.iloc[0]
+    mean_in_second = sorted_expr.iloc[1]
+    mean_in_rest = gene_expr.drop(top_ct).mean()
+    
+    pct_in_top = pct_mat.loc[gene, top_ct]
+    
+    # Calculate key metrics
+    row['top_celltype'] = top_ct
+    row['mean_in_top'] = mean_in_top
+    row['pct_in_top'] = pct_in_top
+    row['log2fc_vs_rest'] = np.log2((mean_in_top + pseudo_count) / (mean_in_rest + pseudo_count))
+    row['log2fc_vs_second'] = np.log2((mean_in_top + pseudo_count) / (mean_in_second + pseudo_count))
+    
+    # Statistical test (Wilcoxon rank-sum)
+    in_ct_vals = adata_g[adata_g.obs["celltype"] == top_ct, gene].X.toarray().ravel()
+    out_ct_vals = adata_g[adata_g.obs["celltype"] != top_ct, gene].X.toarray().ravel()
+    
+    if np.sum(in_ct_vals) == 0 and np.sum(out_ct_vals) == 0:
+        pvals.append(1.0)
+    else:
+        _, p = ranksums(in_ct_vals, out_ct_vals, alternative='greater')
+        pvals.append(p)
+        
+    # --- Tier Classification Logic ---
+    is_significant = False # We'll set this after p-value adjustment
+    
+    cond_tier1 = [
+        row['log2fc_vs_rest'] >= LFC_REST_HIGH,
+        row['log2fc_vs_second'] >= LFC_SECOND_HIGH,
+        pct_in_top >= PCT_EXPR_MIN
+    ]
+    
+    cond_tier2 = [
+        row['log2fc_vs_rest'] >= LFC_REST_HIGH,
+        row['log2fc_vs_second'] < LFC_SHARED_LOW,
+        pct_in_top >= PCT_EXPR_MIN
+    ]
+
+    cond_tier3 = [
+        row['log2fc_vs_rest'] >= LFC_ENRICHED,
+        pct_in_top >= 10.0 # A slightly lower bar for enriched
+    ]
+
+    if all(cond_tier1):
+        row['marker_tier'] = 'Tier 1: High-Confidence'
+    elif all(cond_tier2):
+        row['marker_tier'] = 'Tier 2: Shared'
+    elif all(cond_tier3):
+        row['marker_tier'] = 'Tier 3: Enriched'
+    else:
+        row['marker_tier'] = 'Non-marker'
+
+    # Identify potential shared targets for Tier 2 markers
+    if row['marker_tier'] == 'Tier 2: Shared':
+        # Find all cell types with expression close to the top one
+        shared_targets = sorted_expr[sorted_expr > (mean_in_top / 2.0)].index.tolist()
+        row['potential_shared_targets'] = ', '.join(shared_targets)
+    else:
+        row['potential_shared_targets'] = ''
+
+    analysis_rows.append(row)
+
+# Create the new dataframe
+enhanced_df = pd.DataFrame(analysis_rows)
+
+# Add adjusted p-values and filter tiers by significance
+enhanced_df['p_val'] = pvals
+enhanced_df['p_adj'] = multipletests(enhanced_df['p_val'], method="fdr_bh")[1]
+
+# Re-classify any non-significant gene as "Non-marker"
+enhanced_df.loc[enhanced_df['p_adj'] > PADJ_THR, 'marker_tier'] = 'Non-marker'
+
+# --- D: Save results ---
+# Order columns for clarity
+column_order = [
+    'gene', 'marker_tier', 'top_celltype', 'mean_in_top', 'pct_in_top', 
+    'log2fc_vs_rest', 'log2fc_vs_second', 'p_adj', 'potential_shared_targets'
+]
+enhanced_df = enhanced_df[column_order]
+
+# Sort by tier and then by specificity score for a clean view
+enhanced_df = enhanced_df.sort_values(by=['marker_tier', 'log2fc_vs_rest'], ascending=[True, False])
+
+enhanced_df.to_csv("enhanced_marker_analysis_stromal.csv", index=False)
+print("Enhanced marker analysis complete. Results saved to 'enhanced_marker_analysis_stromal.csv'")
+print(enhanced_df.head(20))
